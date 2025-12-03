@@ -5,5 +5,7 @@ myenv
 .DS_Store
 .vscode/
 .idea/
-.venv
+.venv/
+venv/
 .env
+links.csv
