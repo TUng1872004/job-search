@@ -317,9 +317,6 @@ if __name__ == "__main__":
     # Setup Elasticsearch Index (Custom class from 'search' module)
     matcher = HybridJDCVMatching(es_client=es_client, openai_client=openai_client)
     matcher.create_index("job_postings")
-
-    # Create Kafka Topic if it doesn't exist
-    kafka.create_topic('job_postings', num_partitions=3, replication_factor=1)
     
     # Start the Crawler
     crawler = VietNamWorkWebCrawler(kafka_service=kafka)

@@ -2,6 +2,7 @@ import os
 import sys
 import json
 from typing import List
+from kafka_service import KafkaService
 from pyflink.common import SimpleStringSchema, WatermarkStrategy, Configuration
 from pyflink.datastream import StreamExecutionEnvironment
 from pyflink.datastream.functions import FlatMapFunction, RuntimeContext
@@ -243,6 +244,10 @@ class JobConsumerPipeline:
 if __name__ == "__main__":
     # Path to the Flink Kafka Connector JAR
     jar_path = ["jars/flink-sql-connector-kafka-3.2.0-1.19.jar"]
+
+    # Create Kafka Topic if it doesn't exist
+    kafka_service = KafkaService(bootstrap_servers="localhost:9092")
+    kafka_service.create_topic("job_postings", num_partitions=3, replication_factor=1)
     
     # Initialize and run the pipeline
     pipeline = JobConsumerPipeline(jar_paths=jar_path)
