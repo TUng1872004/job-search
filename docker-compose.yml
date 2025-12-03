@@ -22,3 +22,36 @@ services:
       ELASTICSEARCH_HOSTS: "http://elasticsearch:9200"
     depends_on:
       - elasticsearch
+
+  kafka-job:
+    image: confluentinc/cp-kafka:7.4.3
+    container_name: kafka-job
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-job-data:/var/lib/kafka/data
+    environment:
+      # --- KRaft Configuration ---
+      KAFKA_KRAFT_MODE: "true"
+      CLUSTER_ID: "SVP5qvbbQgSy6Ir270RM7w"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: controller,broker
+      
+      # QUAN TRỌNG: Chỉ liệt kê chính nó trong danh sách bỏ phiếu
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-job:9093
+      
+      # --- Listeners ---
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,INTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka-job:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+
+      # --- Single Node Settings (BẮT BUỘC CHO 1 NODE) ---
+      # Giảm số lượng bản sao xuống 1, nếu không Kafka sẽ báo lỗi vì không đủ broker
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+volumes:
+  kafka-job-data:
