@@ -1,0 +1,12 @@
+python-dotenv
+elasticsearch
+openai
+datasketch
+confluent-kafka
+beautifulsoup4
+lxml
+selenium
+webdriver-manager
+apache-flink==1.19.1
+apache-beam==2.43.0
+protobuf==3.20.3

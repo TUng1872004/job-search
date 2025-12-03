@@ -1,0 +1,24 @@
+services:
+  elasticsearch:
+    image: elasticsearch:9.2.1
+    container_name: elasticsearch
+    environment:
+      - node.name=elasticsearch
+      - cluster.name=datasearch
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - cluster.initial_master_nodes=elasticsearch
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - D:/elasticsearch/data:/usr/share/elasticsearch/data
+
+  kibana:
+    image: kibana:9.2.1
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: "http://elasticsearch:9200"
+    depends_on:
+      - elasticsearch
