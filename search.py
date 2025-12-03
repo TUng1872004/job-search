@@ -20,7 +20,7 @@ from openai import OpenAI
 from elasticsearch import Elasticsearch, helpers
 
 # ------------------------------------------------------------
-# Config & Constants (Giữ nguyên bên ngoài)
+# Config & Constants (Keep at global scope)
 # ------------------------------------------------------------
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -32,16 +32,16 @@ INDEX_NAME = os.getenv("INDEX_NAME", "job_postings")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 NUM_PERM = int(os.getenv("NUM_PERM", "128"))
 
-# Fusion params (Giữ nguyên)
+# Fusion params (Keep as is)
 TOP_K_PER_SOURCE = 10
 FINAL_K = 10
 RRF_K = 60
-WEIGHT_SEMANTIC = 1.2  # Tăng trọng số semantic (context quan trọng)
-WEIGHT_MINHASH = 1.5   # Tăng trọng số MinHash (skills là then chốt)
-WEIGHT_BM25 = 1.0      # BM25 cho title matching
+WEIGHT_SEMANTIC = 1.2  # Increase semantic weight (context is important)
+WEIGHT_MINHASH = 1.5   # Increase MinHash weight (skills are key/pivotal)
+WEIGHT_BM25 = 1.0      # BM25 for title matching
 
 # ------------------------------------------------------------
-# Clients (Giữ nguyên khởi tạo bên ngoài)
+# Clients (Keep initialization outside)
 # ------------------------------------------------------------
 client = OpenAI(api_key=OPENAI_API_KEY)
 es = Elasticsearch(ES_HOST)
@@ -60,9 +60,9 @@ except Exception as e:
 class HybridJDCVMatching:
     def __init__(self, es_client: Elasticsearch, openai_client: OpenAI):
         """
-        Inject dependencies để class hoạt động.
-        Các biến config khác (INDEX_NAME, NUM_PERM...) vẫn lấy từ global constant 
-        để đảm bảo không thay đổi logic mặc định.
+        Inject dependencies for the class to function.
+        Other config variables (INDEX_NAME, NUM_PERM...) are still taken from global constants 
+        to ensure default logic is not changed.
         """
         self.es = es_client
         self.client = openai_client
@@ -443,10 +443,10 @@ class HybridJDCVMatching:
 
 
 # ------------------------------------------------------------
-# Demo (Logic giữ nguyên, chỉ gọi qua class instance)
+# Demo (Logic remains the same, only called via class instance)
 # ------------------------------------------------------------
 if __name__ == "__main__":
-    # KHỞI TẠO CLASS
+    # INITIALIZE CLASS
     matcher = HybridJDCVMatching(es_client=es, openai_client=client)
 
     # # 1. Create index
@@ -464,10 +464,10 @@ if __name__ == "__main__":
     print(f"CV Title: {cv_data['title']}")
     print(f"CV Skills: {cv_data['skills']}")
 
-    # 5. Search (Gọi qua matcher instance)
+    # 5. Search (Called via matcher instance)
     merged_results, components = matcher.hybrid_search_cv_to_jobs(cv_data, top_k_per_source=5, final_k=5)
 
-    # 6. Display results (Giữ nguyên cấu trúc in ấn)
+    # 6. Display results (Keep print structure as is)
     print("\n" + "=" * 60)
     print("FINAL RANKED RESULTS (Top Jobs)")
     print("=" * 60)
