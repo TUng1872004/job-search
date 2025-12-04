@@ -29,10 +29,14 @@ load_dotenv()
 WINDOW_SIZE = "1920,1080"
 VIETNAMWORK_GMAIL = os.getenv("VNW_GMAIL")
 VIETNAMWORK_PASSWORD = os.getenv("VNW_PASSWORD")
+ES_HOST = os.getenv("ES_HOST", "http://localhost:9200")
+INDEX_NAME = os.getenv("INDEX_NAME", "job_postings")
+BOOTSTRAP_SERVERS = os.getenv("BOOTSTRAP_SERVERS", "localhost:9092")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Number of parallel browser instances. 
 # Warning: Each worker opens a Chrome window. Adjust based on available RAM (e.g., 3-4 workers for 8GB RAM).
-MAX_WORKERS = 4  
+MAX_WORKERS = 5
 
 # Thread locks to ensure safe writing to shared resources (files/lists) in a multi-threaded environment
 file_lock = Lock()
@@ -144,7 +148,6 @@ class VietNamWorkWebCrawler:
             print(f"[{t_name} | ID:{worker_driver.session_id[:6]}] >> Start: {link_url}")
             
             worker_driver.get(link_url)
-            time.sleep(2) # Wait for page load
 
             last_height = worker_driver.execute_script("return document.body.scrollHeight")
             self.scroll_and_wait(worker_driver, last_height)
@@ -157,18 +160,11 @@ class VietNamWorkWebCrawler:
                 ten_cv = '' 
                 print(f"Error extracting title: {e}")
 
-            self.random_delay(1, 3)
-
             try:
                 diadiem_cv = worker_driver.find_element(By.XPATH, '(.//*[normalize-space(text()) and normalize-space(.)=\'Địa điểm làm việc\'])[1]/following::div[3]').text
             except: diadiem_cv = ''
             
             try:
-                # Click "View full description" if the button exists
-                btns = worker_driver.find_elements(By.XPATH, '//button[@aria-label="Xem đầy đủ mô tả công việc"]')
-                if btns:
-                    worker_driver.execute_script("arguments[0].click();", btns[0])
-                    time.sleep(1)
                 mota_cv = worker_driver.find_element(By.XPATH, '(.//*[normalize-space(text()) and normalize-space(.)=\'Nộp đơn\'])[1]/following::div[5]').text
             except: mota_cv = ''
 
@@ -199,22 +195,6 @@ class VietNamWorkWebCrawler:
                 worker_driver.quit()
         
         return job_data
-    
-    @staticmethod
-    def clean_location(text):
-        """Removes metadata like 'Expired' or 'Views' from location text."""
-        if not isinstance(text, str): return ""
-        lines = text.split('\n')
-        clean_lines = [line.strip() for line in lines if "Hết hạn" not in line and "lượt xem" not in line]
-        return ", ".join(clean_lines)
-
-    @staticmethod
-    def clean_description(text):
-        """Standardizes the description text (removes headers, fixes newlines)."""
-        if not isinstance(text, str): return ""
-        text = re.sub(r'(?i)mô tả công việc[:\s]*', '', text)
-        text = re.sub(r'\n+', '\n', text).strip()
-        return text
 
     def get_job_links(self):
         """Retrieves all job block elements from the current list page."""
@@ -310,13 +290,13 @@ class VietNamWorkWebCrawler:
 
 if __name__ == "__main__":
     # Initialize Infrastructure Services
-    kafka = KafkaService(bootstrap_servers='localhost:9092')
-    es_client = Elasticsearch("http://localhost:9200")
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    kafka = KafkaService(bootstrap_servers=BOOTSTRAP_SERVERS)
+    es_client = Elasticsearch(ES_HOST)
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
     # Setup Elasticsearch Index (Custom class from 'search' module)
     matcher = HybridJDCVMatching(es_client=es_client, openai_client=openai_client)
-    matcher.create_index("job_postings")
+    matcher.create_index(INDEX_NAME)
     
     # Start the Crawler
     crawler = VietNamWorkWebCrawler(kafka_service=kafka)
