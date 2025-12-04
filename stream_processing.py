@@ -246,7 +246,7 @@ class JobConsumerPipeline:
         try:
             self.env.execute("Job Postings Hybrid Pipeline")
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"Error: {e}")
 
 if __name__ == "__main__":
 
