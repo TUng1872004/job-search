@@ -1,0 +1,4 @@
+docling
+google-generativeai
+pydantic 
+python-dotenv

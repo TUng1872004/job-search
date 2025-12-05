@@ -1,3 +1,6 @@
 data/*
 kaggle/*
-test/*
+
+myvenv/
+.venv/
+.env
