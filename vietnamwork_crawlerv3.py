@@ -165,6 +165,11 @@ class VietNamWorkWebCrawler:
             except: diadiem_cv = ''
             
             try:
+                # Click xem thêm mô tả
+                btns = worker_driver.find_elements(By.XPATH, '//button[@aria-label="Xem đầy đủ mô tả công việc"]')
+                if btns:
+                    worker_driver.execute_script("arguments[0].click();", btns[0])
+                    time.sleep(1)
                 mota_cv = worker_driver.find_element(By.XPATH, '(.//*[normalize-space(text()) and normalize-space(.)=\'Nộp đơn\'])[1]/following::div[5]').text
             except: mota_cv = ''
 
@@ -176,6 +181,15 @@ class VietNamWorkWebCrawler:
                 so_nam_kn_min = worker_driver.find_element(By.XPATH, '(.//*[normalize-space(text()) and normalize-space(.)=\'SỐ NĂM KINH NGHIỆM TỐI THIỂU\'])[1]/following::p[1]').text
             except: so_nam_kn_min = 0
 
+            try:
+                yeu_cau_cv = worker_driver.find_element(By.XPATH, '//*[@id="vnwLayout__col"]/div/div[3]/div/div/div[2]/div[2]/div').text
+                if (yeu_cau_cv.strip() == ''):
+                    yeu_cau_cv = worker_driver.find_element(By.XPATH, '//*[@id="__next"]/main/div/main/div/div[3]/div[1]/div[2]/div').text
+                if (yeu_cau_cv.strip() == ''):
+                    yeu_cau_cv = worker_driver.find_element(By.XPATH, '//h2[contains(text(), "Yêu cầu công việc")]/parent::div//div[contains(@class, "sc-1671001a-6")]').text
+            except: 
+                pass
+
             # 3. Package data into a dictionary
             job_data = {
                 "title": ten_cv,
@@ -183,6 +197,7 @@ class VietNamWorkWebCrawler:
                 "description": mota_cv,
                 "required_skills": kynang_cv,
                 "min_experience_years": so_nam_kn_min,
+                "job_requirements": yeu_cau_cv,
                 "link": link_url
             }
             # ------------------------------------------------

@@ -101,15 +101,38 @@ class ElasticWriter(FlatMapFunction):
     def flush_buffer(self):
         """
         Helper function to perform Bulk Indexing to Elasticsearch.
+        UPDATED: Handle errors gracefully and log details without crashing.
         """
-        if not self.buffer: return
+        if not self.buffer:
+            return
+
         try:
-            # helpers.bulk sends a single HTTP request containing multiple documents
-            success, errors = helpers.bulk(self.es, self.buffer, stats_only=True)
-            print(f">>> [Bulk Saved] {success} docs saved. Buffer cleared.")
-            self.buffer = [] # Reset buffer
+            # raise_on_error=False: Ngăn chương trình bị crash khi ES từ chối data
+            # stats_only=False: Trả về danh sách chi tiết các item bị lỗi
+            success, failed = helpers.bulk(
+                self.es, 
+                self.buffer, 
+                stats_only=False, 
+                raise_on_error=False
+            )
+            
+            print(f">>> [Bulk Saved] {success} docs saved.")
+
+            # Nếu có documents bị lỗi, in chi tiết ra để sửa
+            if failed:
+                print(f">>> [ERROR] {len(failed)} documents failed to index. Details below:")
+                for item in failed:
+                    # In ra lỗi cụ thể (ví dụ: mapper_parsing_exception)
+                    error_detail = item.get('index', {}).get('error', {})
+                    print(f"    - ID: {item.get('index', {}).get('_id')}")
+                    print(f"    - Reason: {error_detail.get('reason')}")
+                    # print(f"    - Full Error: {item}") # Bỏ comment nếu muốn xem full log
+
         except Exception as e:
-            print(f"!!! [Bulk Error] {e}")
+            print(f">>> [CRITICAL ERROR] Bulk write failed completely: {str(e)}")
+        
+        # Reset buffer để tiếp tục xử lý lô tiếp theo
+        self.buffer = []
 
     def flat_map(self, value):
         """
@@ -119,64 +142,64 @@ class ElasticWriter(FlatMapFunction):
         if not value:
             return
 
-        try:
-            # 2. Deserialize & Prepare Data
-            raw_data = json.loads(value)
+        
+        # 2. Deserialize & Prepare Data
+        raw_data = json.loads(value)
 
-            title = raw_data.get("title", "Unknown")
-            location = self.clean_location(raw_data.get("location", ""))
-            description = self.clean_description(raw_data.get("description", ""))
-            
-            # Generate Embeddings (Costly operation)
-            description_embedding = self.embed_text(description) if description else []
-            # description_embedding = [] # Uncomment to skip embedding (faster testing)
+        title = raw_data.get("title", "Unknown")
+        location = self.clean_location(raw_data.get("location", ""))
+        description = self.clean_description(raw_data.get("description", ""))
+        job_requirements = raw_data.get("job_requirements", "")
+        
+        # Generate Embeddings (Costly operation)
+        description_embedding = self.embed_text(description) if description else None
+        job_requirements_embedding = self.embed_text(job_requirements) if job_requirements else None
 
-            # Process Skills & MinHash
-            skills = raw_data.get("required_skills", "")
-            skills_arr = [s.strip() for s in skills.split(',')] if skills else []
-            skills_text = " ".join(skills_arr)
-            skills_signature = self.generate_minhash_signature(skills_arr) 
 
-            min_experience = self.clean_min_experience(raw_data.get("min_experience_years", "0"))
-            link = raw_data.get("link", "")
+        # Process Skills & MinHash
+        skills = raw_data.get("required_skills", "")
+        skills_arr = [s.strip() for s in skills.split(',')] if skills else []
+        skills_text = " ".join(skills_arr)
+        skills_signature = self.generate_minhash_signature(skills_arr) 
 
-            # Construct Document
-            document = {
-                "doc_type": "job",
-                "title": title,
-                "skills": skills_arr,
-                "skills_signature": skills_signature,
-                "skills_text": skills_text,
-                "description": description,
-                "description_vector": description_embedding,
-                # "experience": min_experience,      # Optional fields commented out
-                # "experience_vector": experience_vector,
-                "location": location,
-                # "job_type": raw_data.get("job_type", ""),
-                "experience_years": min_experience,
-                "link": link,
-                "metadata": {
-                    "source": "job_description",
-                    "indexed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                }
+        min_experience = self.clean_min_experience(raw_data.get("min_experience_years", "0"))
+        link = raw_data.get("link", "")
+
+        # Construct Document
+        document = {
+            "doc_type": "job",
+            "title": title,
+            "skills": skills_arr,
+            "skills_signature": skills_signature,
+            "skills_text": skills_text,
+            "description": description,
+            "description_vector": description_embedding,
+            "experience": job_requirements,      # Optional fields commented out
+            "experience_vector": job_requirements_embedding,
+            "location": location,
+            "experience_years": min_experience,
+            "link": link,
+            "metadata": {
+                "source": "job_description",
+                "indexed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             }
+        }
 
-            # Prepare Bulk Action
-            action = {
-                "_index": "job_postings",
-                "_source": document
-            }
-            self.buffer.append(action)
+        # Prepare Bulk Action
+        action = {
+            "_index": "job_postings",
+            "_source": document
+        }
+        self.buffer.append(action)
 
-            # 3. Check Buffer Size -> Flush if full
-            if len(self.buffer) >= self.batch_size:
-                self.flush_buffer()
-                yield f">>> [Bulk Saved] {self.batch_size} documents indexed."
-            else:
-                yield f">>> [Buffered] {len(self.buffer)}/{self.batch_size} documents. [Saved OK] {title[:40]}..."
+        # 3. Check Buffer Size -> Flush if full
+        if len(self.buffer) >= self.batch_size:
+            self.flush_buffer()
+            yield f">>> [Bulk Saved] {self.batch_size} documents indexed."
+        else:
+            yield f">>> [Buffered] {len(self.buffer)}/{self.batch_size} documents. [Saved OK] {title[:40]}..."
             
-        except Exception as e:
-            print(f"!!! [Skip] Error: {e}")
+        
 
     def close(self):
         """
