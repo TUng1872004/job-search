@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-Hybrid JD-CV Matching System (Mock Data Demo)
+Hybrid JD-CV Matching System
 - Features:
-  - Drag & Drop PDF support
-  - Auto-ingest Mock Data (Vectors + MinHash)
-  - Hybrid Search (Semantic + MinHash + BM25)
+  - Drag & Drop PDF support (GUI)
+  - Auto-ingest Mock Data
+  - Hybrid Search:
+    1. Semantic Search on Description
+    2. Semantic Search on Experience
+    3. MinHash LSH for Skills (Exact Jaccard verify)
+    4. BM25 for Title
 """
 
 import os
@@ -17,7 +21,7 @@ from tkinter import filedialog
 from collections import defaultdict
 
 from dotenv import load_dotenv
-from datasketch import MinHash
+from datasketch import MinHash, MinHashLSH
 from openai import OpenAI
 from elasticsearch import Elasticsearch, helpers
 
@@ -37,19 +41,22 @@ if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY missing. Put it in .env or environment.")
 
 ES_HOST = os.getenv("ES_HOST", "http://localhost:9200")
-
-# FORCE MOCK INDEX NAME
-# We are using a hardcoded name to prevent environment variable formatting errors.
-# Original: INDEX_NAME = os.getenv("INDEX_NAME", "job_postings_demo").strip()
-INDEX_NAME = "mock_job_index"
+INDEX_NAME = os.getenv("ES_INDEX", "job_postings")
 
 EMBEDDING_MODEL = "text-embedding-3-small"
 NUM_PERM = 128
+LSH_THRESHOLD = 0.05
 
 # Fusion params
 TOP_K_PER_SOURCE = 10
 FINAL_K = 5
 RRF_K = 60
+
+# Weights from Script B
+WEIGHT_SEMANTIC_DESC = 1.2
+WEIGHT_SEMANTIC_EXP = 0.8
+WEIGHT_MINHASH = 1.5
+WEIGHT_BM25 = 1.0
 
 # ------------------------------------------------------------
 # Clients
@@ -61,7 +68,6 @@ es = Elasticsearch(
     ssl_show_warn=False
 )
 
-
 # ------------------------------------------------------------
 # Class Definition
 # ------------------------------------------------------------
@@ -69,22 +75,32 @@ class HybridJDCVMatching:
     def __init__(self, es_client: Elasticsearch, openai_client: OpenAI):
         self.es = es_client
         self.client = openai_client
+        
+        # Initialize LSH Index in memory for skills
+        self.lsh = MinHashLSH(threshold=LSH_THRESHOLD, num_perm=NUM_PERM)
+        self.local_minhashes = {} 
 
     # --- Helpers ---
     def embed_text(self, text: str) -> List[float]:
         """Generate embedding vector via OpenAI API."""
         if not text: return [0.0] * 1536
-        resp = self.client.embeddings.create(model=EMBEDDING_MODEL, input=text)
-        return resp.data[0].embedding
+        try:
+            resp = self.client.embeddings.create(model=EMBEDDING_MODEL, input=text)
+            return resp.data[0].embedding
+        except Exception as e:
+            print(f"Embedding error: {e}")
+            return [0.0] * 1536
 
-    def generate_minhash_signature(self, tokens: List[str], num_perm: int = NUM_PERM) -> List[str]:
-        """Generate MinHash signature from list of tokens (skills)."""
-        if not tokens: return []
-        tokens_set = set(t.lower().strip() for t in tokens if t.strip())
+    def generate_minhash(self, tokens: List[str], num_perm: int = NUM_PERM) -> MinHash:
+        """Generate MinHash object from list of tokens (skills)."""
         m = MinHash(num_perm=num_perm)
+        if not tokens: 
+            return m
+        # Normalize logic
+        tokens_set = set(t.lower().strip() for t in tokens if t.strip())
         for t in tokens_set:
             m.update(t.encode("utf-8"))
-        return [f"hash_{v}" for v in m.hashvalues]
+        return m
 
     # --- Index Management ---
     def create_index(self, index_name: str = INDEX_NAME):
@@ -134,72 +150,77 @@ class HybridJDCVMatching:
 
     # --- Mock Data Ingestion ---
     def ingest_mock_data(self):
-        """Generates embeddings and hashes for mock jobs and inserts them into ES."""
-        # Check if data already exists to avoid re-billing OpenAI
-        try:
-            count = self.es.count(index=INDEX_NAME, body={"query": {"match_all": {}}})
-            if count['count'] > 0:
-                print(f"INFO: Index already contains {count['count']} documents. Skipping mock ingestion.")
-                return
-        except Exception:
-            pass  # Index might be empty
+        """Generates embeddings (Desc + Exp) and hashes, inserts to ES and LSH."""
+        print("INFO: Generating mock data...")
 
-        print("INFO: Generating mock data (Embeddings & Hashes)... This may take a few seconds.")
-
-        # --- MOCK DATA SOURCE ---
         mock_jobs = [
             {
                 "title": "Senior Python Backend Engineer",
                 "skills": ["Python", "Django", "FastAPI", "PostgreSQL", "Docker", "AWS", "Redis"],
-                "description": "We are looking for a Python expert to build scalable APIs. Experience with microservices and cloud infrastructure is required.",
-                "experience": "5+ years of backend development experience."
+                "description": "We are looking for a Python expert to build scalable APIs. Experience with microservices.",
+                "experience": "5+ years of backend development experience. Proven track record in high-load systems."
             },
             {
                 "title": "Sales Manager (B2B)",
-                "skills": ["Sales", "Negotiation", "CRM", "Salesforce", "Lead Generation", "Communication"],
-                "description": "Drive revenue growth by managing sales teams and closing B2B deals. Must have a strong network in the technology sector.",
-                "experience": "7 years in sales, specifically B2B software."
+                "skills": ["Sales", "Negotiation", "CRM", "Salesforce", "Lead Generation"],
+                "description": "Drive revenue growth by managing sales teams and closing B2B deals.",
+                "experience": "7 years in sales, specifically B2B software. Management experience required."
             },
             {
                 "title": "Data Analyst",
-                "skills": ["SQL", "Tableau", "Python", "Excel", "Data Visualization", "Statistics"],
-                "description": "Analyze large datasets to provide actionable insights for the business. Proficiency in SQL and dashboarding tools is a must.",
-                "experience": "3 years of data analysis experience."
+                "skills": ["SQL", "Tableau", "Python", "Excel", "Data Visualization"],
+                "description": "Analyze large datasets to provide actionable insights for the business.",
+                "experience": "3 years of data analysis experience in a fintech environment."
+            },
+            {
+                "title": "Frontend React Developer",
+                "skills": ["Javascript", "React", "Redux", "HTML", "CSS", "TypeScript"],
+                "description": "Build responsive UI components. Strong understanding of DOM.",
+                "experience": "3 years frontend development. Experience with React Hooks and State Management."
             }
         ]
-        # ------------------------
 
         actions = []
         for i, job in enumerate(mock_jobs):
-            # Generate Vectors
-            desc_vec = self.embed_text(job['description'])
-            exp_vec = self.embed_text(job['experience'])
+            doc_id = f"mock_job_{i}"
+            
+            # 1. Generate Vectors (Desc + Exp)
+            desc_vec = self.embed_text(job.get('description', ''))
+            exp_vec = self.embed_text(job.get('experience', '')) # NEW
 
-            # Generate MinHash
-            sig = self.generate_minhash_signature(job['skills'])
+            # 2. Generate MinHash Object
+            m = self.generate_minhash(job.get('skills', []))
+            
+            # 3. Insert into LSH (In-Memory)
+            self.lsh.insert(doc_id, m)
+            self.local_minhashes[doc_id] = m
 
+            # 4. Prepare ES Document
             doc = {
                 "_index": INDEX_NAME,
-                "_id": f"mock_job_{i}",
+                "_id": doc_id,
                 "_source": {
                     "doc_type": "job",
                     "title": job['title'],
                     "skills": job['skills'],
-                    "skills_signature": sig,
                     "description": job['description'],
                     "description_vector": desc_vec,
-                    "experience": job['experience'],
-                    "experience_vector": exp_vec
+                    "experience": job['experience'],       # NEW
+                    "experience_vector": exp_vec           # NEW
                 }
             }
             actions.append(doc)
 
         helpers.bulk(self.es, actions)
-        print(f"SUCCESS: Ingested {len(actions)} mock jobs into Elasticsearch.")
-        time.sleep(1)  # Allow ES to refresh
+        print(f"SUCCESS: Ingested {len(actions)} jobs.")
+        time.sleep(1)
 
     # --- Search Methods ---
     def semantic_search(self, vector: List[float], field: str, top_k: int) -> List[Dict]:
+        """Generic semantic search for any vector field."""
+        if not vector or all(v == 0.0 for v in vector):
+            return []
+            
         body = {
             "size": top_k,
             "query": {
@@ -213,27 +234,49 @@ class HybridJDCVMatching:
             }
         }
         resp = self.es.search(index=INDEX_NAME, body=body)
-        return [{"id": h["_id"], "score": h["_score"], "source": f"sem_{field}", **h["_source"]} for h in
-                resp["hits"]["hits"]]
+        return [{"id": h["_id"], "score": h["_score"], "source": f"sem_{field}", **h["_source"]} 
+                for h in resp["hits"]["hits"]]
 
-    def minhash_search(self, signature: List[str], top_k: int) -> List[Dict]:
-        body = {
-            "size": top_k,
-            "query": {
-                "script_score": {
-                    "query": {"term": {"doc_type": "job"}},
-                    "script": {
-                        "source": "int m=0; for(int i=0;i<params.h.length;++i){if(doc['skills_signature'].contains(params.h[i])){m++;}} return m;",
-                        "params": {"h": signature}
-                    }
-                }
-            }
-        }
+    def lsh_search(self, cv_skills: List[str], top_k: int) -> List[Dict]:
+        """Uses MinHashLSH to find candidates, then computes exact Jaccard."""
+        query_m = self.generate_minhash(cv_skills)
+        candidate_ids = self.lsh.query(query_m)
+
+        print(f"LSH found {len(candidate_ids)} candidates for skills: {cv_skills}")
+        
+        if not candidate_ids: return []
+
+        scored_candidates = []
+        for doc_id in candidate_ids:
+            if doc_id in self.local_minhashes:
+                candidate_m = self.local_minhashes[doc_id]
+                jaccard_score = query_m.jaccard(candidate_m)
+                scored_candidates.append((doc_id, jaccard_score))
+        
+        scored_candidates.sort(key=lambda x: x[1], reverse=True)
+        top_candidates = scored_candidates[:top_k]
+        
+        if not top_candidates: return []
+
+        ids_only = [x[0] for x in top_candidates]
+        scores_map = {x[0]: x[1] for x in top_candidates}
+        
+        body = {"query": {"ids": {"values": ids_only}}}
         resp = self.es.search(index=INDEX_NAME, body=body)
-        return [{"id": h["_id"], "score": h["_score"], "source": "minhash", **h["_source"]} for h in
-                resp["hits"]["hits"]]
+        
+        results = []
+        for h in resp["hits"]["hits"]:
+            did = h["_id"]
+            results.append({
+                "id": did,
+                "score": scores_map.get(did, 0.0),
+                "source": "lsh_minhash",
+                **h["_source"]
+            })
+        return sorted(results, key=lambda x: x['score'], reverse=True)
 
     def bm25_search(self, text: str, top_k: int) -> List[Dict]:
+        if not text: return []
         body = {
             "size": top_k,
             "query": {
@@ -259,7 +302,12 @@ class HybridJDCVMatching:
                 did = item["id"]
                 scores[did] += w * (1.0 / (RRF_K + rank))
                 if did not in meta:
-                    meta[did] = {"title": item.get("title"), "skills": item.get("skills"), "sources": {}}
+                    meta[did] = {
+                        "title": item.get("title"), 
+                        "skills": item.get("skills"), 
+                        "experience": item.get("experience"),
+                        "sources": {}
+                    }
                 meta[did]["sources"][item["source"]] = {"rank": rank, "raw_score": item["score"]}
 
         final = []
@@ -269,6 +317,7 @@ class HybridJDCVMatching:
                 "rrf_score": score,
                 "title": meta[did]["title"],
                 "skills": meta[did]["skills"],
+                "experience": meta[did]["experience"],
                 "sources": meta[did]["sources"]
             })
 
@@ -279,22 +328,46 @@ class HybridJDCVMatching:
 
         # 1. Semantic Description
         desc_vec = self.embed_text(cv_data.get("description", ""))
-        sem_res = self.semantic_search(desc_vec, "description_vector", TOP_K_PER_SOURCE)
-        print(f"1. Semantic (Desc): Found {len(sem_res)} candidates")
+        sem_desc_res = self.semantic_search(desc_vec, "description_vector", TOP_K_PER_SOURCE)
+        print(f"1. Semantic (Desc): Found {len(sem_desc_res)} candidates")
 
-        # 2. MinHash Skills
-        sig = self.generate_minhash_signature(cv_data.get("skills", []))
-        mh_res = self.minhash_search(sig, TOP_K_PER_SOURCE)
-        print(f"2. MinHash (Skills): Found {len(mh_res)} candidates")
+        # 2. Semantic Experience
+        exp_vec = self.embed_text(cv_data.get("experience", ""))
+        sem_exp_res = self.semantic_search(exp_vec, "experience_vector", TOP_K_PER_SOURCE)
+        print(f"2. Semantic (Exp): Found {len(sem_exp_res)} candidates")
 
-        # 3. BM25 Title
+        # 3. LSH MinHash Skills
+        mh_res = self.lsh_search(cv_data.get("skills", []), TOP_K_PER_SOURCE)
+        print(f"3. LSH (Skills): Found {len(mh_res)} candidates")
+
+        # 4. BM25 Title
         bm_res = self.bm25_search(cv_data.get("title", ""), TOP_K_PER_SOURCE)
-        print(f"3. BM25 (Title): Found {len(bm_res)} candidates")
+        print(f"4. BM25 (Title): Found {len(bm_res)} candidates")
 
         # Fusion
-        # Weights: Semantic=1.2, MinHash=1.5 (High precision on skills), BM25=1.0
-        return self.reciprocal_rank_fusion([sem_res, mh_res, bm_res], [1.2, 1.5, 1.0])
+        # Order: [Desc, Exp, MinHash, BM25]
+        return self.reciprocal_rank_fusion(
+            [sem_desc_res, sem_exp_res, mh_res, bm_res], 
+            [WEIGHT_SEMANTIC_DESC, WEIGHT_SEMANTIC_EXP, WEIGHT_MINHASH, WEIGHT_BM25]
+        )
+    
+    def load_skills_to_lsh(self):
+        data = self.es.search(index=INDEX_NAME, body={
+            "query": {
+                "term": {
+                    "doc_type": "job"
+                }
+            },
+            "size": 1000
+        })
+        for hit in data['hits']['hits']:
+            doc_id = hit['_id']
+            skills = hit['_source'].get('skills', [])
+            m = self.generate_minhash(skills)
+            self.lsh.insert(doc_id, m)
+            self.local_minhashes[doc_id] = m
 
+        print("Number of query from elasticsearch:", len(data['hits']['hits']))
 
 # ------------------------------------------------------------
 # Helper: Get File Path
@@ -302,25 +375,16 @@ class HybridJDCVMatching:
 def get_pdf_path():
     if len(sys.argv) > 1:
         return sys.argv[1]
-
     print(">>> Opening file selector...")
-
     root = tk.Tk()
     root.withdraw()
-
     path = filedialog.askopenfilename(
         title="Select your CV (PDF)",
         filetypes=[("PDF Files", "*.pdf"), ("All Files", "*.*")]
     )
-
     root.destroy()
-
-    if not path:
-        print("[!] No file selected. Exiting.")
-        sys.exit(0)
-
-    print(f">>> Selected: {path}")
     return path
+
 
 
 # ------------------------------------------------------------
@@ -329,15 +393,17 @@ def get_pdf_path():
 if __name__ == "__main__":
     # 1. Setup
     matcher = HybridJDCVMatching(es, client)
+    matcher.load_skills_to_lsh()
+    
+    # # Run once to setup index with new schema
     matcher.create_index()
-    matcher.ingest_mock_data()  # <--- INJECT MOCK DATA ONLY
+    # matcher.ingest_mock_data()
 
     # 2. Get CV File
     pdf_path = get_pdf_path()
-
-    if not os.path.exists(pdf_path):
-        print(f"ERROR: File does not exist: {pdf_path}")
-        sys.exit(1)
+    if not pdf_path or not os.path.exists(pdf_path):
+        print("No file selected or file not found.")
+        sys.exit(0)
 
     try:
         # 3. Extract
@@ -345,8 +411,8 @@ if __name__ == "__main__":
         extractor = ResumeExtractor(test=0)
         cv_data = extractor.extract(pdf_path)
 
-        print(f"   Detected Title: {cv_data.get('title')}")
-        print(f"   Detected Skills: {cv_data.get('skills')[:5]}...")  # Show first 5
+        print(f"   Title: {cv_data.get('title')}")
+        print(f"   Skills: {cv_data.get('skills')}...")
 
         # 4. Search
         results = matcher.hybrid_search(cv_data)
@@ -363,10 +429,10 @@ if __name__ == "__main__":
             print(f"\n{i}. {r['title']}")
             print(f"   ID: {r['id']} | RRF Score: {r['rrf_score']:.5f}")
             print(f"   Skills in JD: {r['skills']}")
-            print(f"   Why matched?: {json.dumps(r['sources'], indent=0)}")
+            print(f"   Experience in JD: {r['experience'][:100]}...")
+            print(f"   Why matched?: {json.dumps(r['sources'], indent=2)}")
 
     except Exception as e:
         print(f"\nCRITICAL ERROR: {e}")
         import traceback
-
         traceback.print_exc()
