@@ -17,10 +17,10 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from dotenv import load_dotenv
 
-from search import HybridJDCVMatching
 from kafka_service import KafkaService
 from elasticsearch import Elasticsearch
 from openai import OpenAI
+import sys
 
 # Load environment variables
 load_dotenv()
@@ -302,17 +302,59 @@ class VietNamWorkWebCrawler:
         finally:
             if self.main_driver:
                 self.main_driver.quit()
+    
+    def create_index(self, es: Elasticsearch,  index_name: str = INDEX_NAME):
+        """Creates the index with correct mappings if it does not exist."""
+        try:
+            if es.indices.exists(index=index_name):
+                print(f"INFO: Index '{index_name}' already exists.")
+                return
+        except Exception as e:
+            print(f"WARNING: Check exists failed ({e}). Attempting to create index anyway...")
+
+        mapping = {
+            "mappings": {
+                "properties": {
+                    "doc_type": {"type": "keyword"},
+                    "title": {
+                        "type": "text",
+                        "analyzer": "standard",
+                        "fields": {"keyword": {"type": "keyword"}}
+                    },
+                    "skills": {"type": "keyword"},
+                    "skills_signature": {"type": "keyword"},  # For MinHash exact matches
+                    "description": {"type": "text"},
+                    "description_vector": {
+                        "type": "dense_vector",
+                        "dims": 1536,
+                        "index": True,
+                        "similarity": "cosine"
+                    },
+                    "experience": {"type": "text"},
+                    "experience_vector": {
+                        "type": "dense_vector",
+                        "dims": 1536,
+                        "index": True,
+                        "similarity": "cosine"
+                    }
+                }
+            }
+        }
+
+        try:
+            es.indices.create(index=index_name, body=mapping)
+            print(f"INFO: Index '{index_name}' created successfully.")
+        except Exception as e:
+            print(f"ERROR: Failed to create index '{index_name}': {e}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     # Initialize Infrastructure Services
     kafka = KafkaService(bootstrap_servers=BOOTSTRAP_SERVERS)
     es_client = Elasticsearch(ES_HOST)
     openai_client = OpenAI(api_key=OPENAI_API_KEY)
-
-    # Setup Elasticsearch Index (Custom class from 'search' module)
-    matcher = HybridJDCVMatching(es_client=es_client, openai_client=openai_client)
-    matcher.create_index(INDEX_NAME)
     
     # Start the Crawler
     crawler = VietNamWorkWebCrawler(kafka_service=kafka)
+    crawler.create_index(es=es_client, index_name=INDEX_NAME)
     crawler.run_crawler(start_page=1, end_page=1)

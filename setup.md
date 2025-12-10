@@ -15,7 +15,7 @@ Before starting, ensure you have the following installed:
 
 ## 2\. Python Setup (Version 3.10.11)
 
-This project is strictly tested on **Python 3.10.11**. Using newer versions (3.11+) or older versions may cause conflicts with `apache-beam` and `pyflink`.
+This project is strictly tested on **Python 3.10.11**. Using newer versions (3.11+) or older versions may cause conflicts with `apache-beam` and `pyflink`. Yet you can also keep newer versions for virtual environment of search function.
 
 1.  **Download Python 3.10.11**:
 
@@ -27,19 +27,24 @@ This project is strictly tested on **Python 3.10.11**. Using newer versions (3.1
     ```bash
     # Windows
     py -3.10 -m venv .venv
+    py -3.11 -m venv search-env
 
     # Mac/Linux
     python3.10 -m venv venv
+    python3.11 -m venv search-env
     ```
+*Note: You must use 2 separate environment to run the project*
 
 3.  **Activate the Environment**:
 
     ```bash
     # Windows
     .\venv\Scripts\activate
+    .\search-env\Scripts\activate
 
     # Mac/Linux
     source venv/bin/activate
+    source search-env/bin/activate
     ```
 
 -----
@@ -49,7 +54,11 @@ This project is strictly tested on **Python 3.10.11**. Using newer versions (3.1
 **Install the packages:**
 
 ```bash
+# For venv virtual environment
 pip install -r requirements.txt
+
+# For search-env 
+pip install -r search_requirements.txt
 ```
 
 -----
@@ -134,13 +143,7 @@ INDEX_NAME=job_postings
 
 # Algorithm Config
 NUM_PERM=128
-
-# VietnamWorks Credentials (for Crawler)
-VNW_GMAIL=your_email@example.com
-VNW_PASSWORD=your_password
 ```
-
-*Note: You must create a VietNamWorks account using Google, and your Google account should turn off 2FA or any security methods.*
 
 -----
 
@@ -161,7 +164,7 @@ VNW_PASSWORD=your_password
     python search.py 
     ```
 
-*Note: Each command above must be run with separate terminals*
+*Note: Each command above must be run with separate terminals. With search.py you must run in search-env virtual environment.*
 
 ## Troubleshooting
 
