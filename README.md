@@ -12,6 +12,8 @@ This project is an end-to-end Big Data pipeline designed to match candidates (CV
 ![High level architecture of our system](diagram/architecture.png)
 
 ## Data 
+![The Data consumerism pipeline](diagram/data_streaming.png)
+
 Propose a modular **Producer-Consumer pattern** across three layers:
 
 ### 1. Ingestion Layer (Producer)
@@ -27,7 +29,6 @@ Propose a modular **Producer-Consumer pattern** across three layers:
 ### 3. Storage & Retrieval Layer (Consumer)
 * **Tools:** Elasticsearch (9.x), Kibana.
 * **Function:** Indexes enriched documents and executes Hybrid Search queries [11].
-![The Data consumerism pipeline](diagram/data_streaming.png)
 ## Hybrid Searching
 To match a CV to a Job Description, we use Reciprocal Rank Fusion (RRF) to combine results from three distinct methods:
 
