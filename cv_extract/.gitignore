@@ -1,0 +1,9 @@
+data/
+kaggle/
+test/
+
+myvenv/
+.venv/
+.env
+__pycache__/
+*.pyc

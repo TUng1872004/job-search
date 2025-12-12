@@ -1,0 +1,8 @@
+docling
+google-generativeai
+pydantic 
+python-dotenv
+ollama
+fastapi 
+uvicorn 
+python-multipart
