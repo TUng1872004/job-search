@@ -1,0 +1,12 @@
+__pycache__/
+jars/
+myenv
+*.pyc
+.DS_Store
+.vscode/
+.idea/
+.venv/
+venv/
+.env
+links.csv
+venv_search/
