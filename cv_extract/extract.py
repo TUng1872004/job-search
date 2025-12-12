@@ -86,10 +86,10 @@ class ResumeExtractor:
 
 if __name__ == "__main__":
     MODEL = ["gemini", "local", "classifier"]
-    extractor = ResumeExtractor(model_name=MODEL[1], test=1)
+    extractor = ResumeExtractor(model_name=MODEL[1], test=0)
 
     try:
-        path = "./data/Economy/SALES/10724818.pdf"
+        path = "Cohota_Resume.pdf" # this is for local test only. Change to your own path.
         
         data = extractor.extract(path)
         
